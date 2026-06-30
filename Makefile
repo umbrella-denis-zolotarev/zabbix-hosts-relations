@@ -3,17 +3,17 @@
 -include .docker/.env
 export $(test -e || shell sed 's/=.*//' .docker/.env)
 
-DOCKER_COMPOSE_CMD_RUN = docker compose -f .docker/docker-compose.yml
+DOCKER_COMPOSE_CMD_RUN_DEV = docker compose -f .docker/docker-compose.yml -f .docker/docker-compose-dev.yml
+DOCKER_COMPOSE_CMD_RUN_PROD = docker compose -f .docker/docker-compose.yml
+ifeq ($(DOCKER_ENV),dev)
+	DOCKER_COMPOSE_CMD_RUN = $(DOCKER_COMPOSE_CMD_RUN_DEV)
+else
+	DOCKER_COMPOSE_CMD_RUN = $(DOCKER_COMPOSE_CMD_RUN_PROD)
+endif
 DOCKER_COMPOSE_CMD = $(DOCKER_COMPOSE_CMD_RUN)
 
 EXEC_NODE = $(DOCKER_COMPOSE_CMD) exec node
-RUN_NODE = $(DOCKER_COMPOSE_CMD_RUN) run --rm node
-EXEC_SYMFONY = $(DOCKER_COMPOSE_CMD) exec symfony
-EXEC_DB = $(DOCKER_COMPOSE_CMD) exec db
-EXEC_S3 = $(DOCKER_COMPOSE_CMD) exec s3
-
-status:
-	$(DOCKER_COMPOSE_CMD) ps
+RUN_NODE = $(DOCKER_COMPOSE_CMD_RUN_DEV) run --rm node
 
 build:
 	$(DOCKER_COMPOSE_CMD) build --no-cache

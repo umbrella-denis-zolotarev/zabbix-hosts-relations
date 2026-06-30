@@ -1,0 +1,20 @@
+services:
+
+  node:
+    image: ${DOCKER_CONTAINER_NAME_PREFIX}-node
+    container_name: ${DOCKER_CONTAINER_NAME_PREFIX}-node
+    build: ./node
+    healthcheck:
+      test: "netstat -tulpn | grep :5173"
+      timeout: 45s
+      interval: 2s
+      retries: 20
+    volumes:
+      - ../app:/app
+    env_file:
+      - ./.env
+    ports:
+      - ${NODE_PORT_PUBLIC}:5173
+    working_dir: /app
+    command: npm run dev
+    #command: tail -f /dev/null

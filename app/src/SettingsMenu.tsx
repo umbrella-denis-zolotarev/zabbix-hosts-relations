@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Button, Flex, Modal, Switch, Tooltip, Typography } from "antd";
 import {
   BulbOutlined,
+  ColumnWidthOutlined,
+  CompressOutlined,
   MoonOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
@@ -9,7 +11,7 @@ import { useTheme } from "./theme";
 
 function SettingsMenu() {
   const [open, setOpen] = useState(false);
-  const { mode, setMode } = useTheme();
+  const { mode, setMode, fullWidth, setFullWidth } = useTheme();
 
   return (
     <>
@@ -36,14 +38,25 @@ function SettingsMenu() {
         footer={null}
         destroyOnHidden
       >
-        <Flex align="center" justify="space-between" style={{ marginTop: 8 }}>
-          <Typography.Text>Dark theme</Typography.Text>
-          <Switch
-            checked={mode === "dark"}
-            onChange={(checked) => setMode(checked ? "dark" : "light")}
-            checkedChildren={<MoonOutlined />}
-            unCheckedChildren={<BulbOutlined />}
-          />
+        <Flex vertical gap="middle" style={{ marginTop: 8 }}>
+          <Flex align="center" justify="space-between">
+            <Typography.Text>Dark theme</Typography.Text>
+            <Switch
+              checked={mode === "dark"}
+              onChange={(checked) => setMode(checked ? "dark" : "light")}
+              checkedChildren={<MoonOutlined />}
+              unCheckedChildren={<BulbOutlined />}
+            />
+          </Flex>
+          <Flex align="center" justify="space-between">
+            <Typography.Text>Full width</Typography.Text>
+            <Switch
+              checked={fullWidth}
+              onChange={setFullWidth}
+              checkedChildren={<ColumnWidthOutlined />}
+              unCheckedChildren={<CompressOutlined />}
+            />
+          </Flex>
         </Flex>
       </Modal>
     </>

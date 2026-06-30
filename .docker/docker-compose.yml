@@ -1,0 +1,47 @@
+services:
+
+  node:
+    image: ${DOCKER_CONTAINER_NAME_PREFIX}-node
+    container_name: ${DOCKER_CONTAINER_NAME_PREFIX}-node
+    build: ./node
+    healthcheck:
+      test: "netstat -tulpn | grep :5173"
+      timeout: 45s
+      interval: 2s
+      retries: 20
+    volumes:
+      - ../app:/app
+    env_file:
+      - ./.env
+    ports:
+      - ${NODE_PORT_PUBLIC}:5173
+    working_dir: /app
+    command: npm run dev
+    #command: tail -f /dev/null
+
+  python:
+    image: ${DOCKER_CONTAINER_NAME_PREFIX}-python
+    container_name: ${DOCKER_CONTAINER_NAME_PREFIX}-python
+    build: ./python
+    healthcheck:
+      test: "netstat -tulpn | grep :8000"
+      timeout: 45s
+      interval: 2s
+      retries: 20
+    volumes:
+      - ../server:/server
+    env_file:
+      - ./.env
+    ports:
+      - ${SERVER_PORT_PUBLIC}:8000
+    working_dir: /server
+    command: python main.py
+
+  nginx:
+    image: nginx:alpine
+    container_name: ${DOCKER_CONTAINER_NAME_PREFIX}-nginx
+    volumes:
+      - ../app/dist:/usr/share/nginx/html
+      - ./nginx/conf.d/app.conf:/etc/nginx/conf.d/default.conf
+    ports:
+      - ${NGINX_PORT_PUBLIC}:80

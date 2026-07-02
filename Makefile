@@ -39,6 +39,12 @@ console-node:
 logs-node:
 	$(DOCKER_COMPOSE_CMD) logs --tail=100 -f node
 
+console-redis:
+	$(DOCKER_COMPOSE_CMD) exec redis redis-cli
+
+logs-redis:
+	$(DOCKER_COMPOSE_CMD) logs --tail=100 -f redis
+
 ###
 # nodejs/npm/npx
 ###

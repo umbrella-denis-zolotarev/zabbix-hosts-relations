@@ -17,6 +17,17 @@ services:
       - ${SERVER_PORT_PUBLIC}:8000
     working_dir: /server
     command: python main.py
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:alpine
+    container_name: ${DOCKER_CONTAINER_NAME_PREFIX}-redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      timeout: 45s
+      interval: 2s
+      retries: 20
 
   nginx:
     image: nginx:alpine

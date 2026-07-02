@@ -31,3 +31,6 @@ tmp/
 
 # data
 server/data.json
+
+# ansible script folder for dev
+ansible_quickstart

@@ -51,6 +51,12 @@ console-redis:
 logs-redis:
 	$(DOCKER_COMPOSE_CMD) logs --tail=100 -f redis
 
+console-python:
+	$(DOCKER_COMPOSE_CMD) exec python sh
+
+logs-python:
+	$(DOCKER_COMPOSE_CMD) logs --tail=100 -f python
+
 ###
 # nodejs/npm/npx
 ###

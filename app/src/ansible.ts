@@ -21,11 +21,12 @@ export interface AnsibleStatus {
 export async function runAnsible(
   hostid: string,
   target: string,
+  visibleName: string,
 ): Promise<AnsibleStatus> {
   const res = await fetch(RUN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ hostid, target }),
+    body: JSON.stringify({ hostid, target, visible_name: visibleName }),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
   return res.json();

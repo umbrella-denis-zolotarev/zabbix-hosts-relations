@@ -19,6 +19,7 @@ import {
   ApartmentOutlined,
   ArrowLeftOutlined,
   CodeOutlined,
+  FileTextOutlined,
   LineChartOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
@@ -130,6 +131,7 @@ function HostDetail() {
   // Ansible run state.
   const [ansible, setAnsible] = useState<AnsibleStatus>({ status: "none" });
   const [ansibleStarting, setAnsibleStarting] = useState(false);
+  const [resultOpen, setResultOpen] = useState(false);
 
   const load = async () => {
     if (!hostid) return;
@@ -178,7 +180,7 @@ function HostDetail() {
     try {
       // The ansible inventory target — the host's technical name (e.g. "r0").
       const target = host?.host || hostid;
-      const status = await runAnsible(hostid, target);
+      const status = await runAnsible(hostid, target, host?.name || "");
       setAnsible(status);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -276,6 +278,14 @@ function HostDetail() {
                 {ansibleSummary(ansible)}
               </span>
             </Flex>
+          </Button>
+          <Button
+            icon={<FileTextOutlined />}
+            onClick={() => setResultOpen(true)}
+            disabled={!ansible.output}
+            title="View the last ansible run output"
+          >
+            Ansible run result
           </Button>
           <Button
             icon={<ApartmentOutlined />}
@@ -433,6 +443,41 @@ function HostDetail() {
           options={otherHostOptions}
           optionFilterProp="label"
         />
+      </Modal>
+
+      <Modal
+        title={
+          <Space>
+            <span>Ansible run result · {host?.name || `#${hostid}`}</span>
+            <Tag color={ANSIBLE_STATUS_META[ansible.status]?.color}>
+              {ANSIBLE_STATUS_META[ansible.status]?.label}
+            </Tag>
+          </Space>
+        }
+        open={resultOpen}
+        onCancel={() => setResultOpen(false)}
+        footer={null}
+        width={900}
+      >
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
+          {ansibleSummary(ansible)}
+        </Typography.Paragraph>
+        <pre
+          style={{
+            margin: 0,
+            maxHeight: "60vh",
+            overflow: "auto",
+            padding: 12,
+            background: "rgba(0,0,0,0.35)",
+            borderRadius: 6,
+            fontSize: 12,
+            lineHeight: 1.4,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+          }}
+        >
+          {ansible.output || "No output yet."}
+        </pre>
       </Modal>
     </Flex>
   );

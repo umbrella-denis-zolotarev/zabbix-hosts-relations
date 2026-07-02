@@ -154,8 +154,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         # The ansible inventory target (e.g. "r0"); falls back to the host id.
         target = str(body.get("target") or hostid)
+        # The host's Zabbix visible name, passed as a second script argument.
+        visible_name = str(body.get("visible_name") or "")
 
-        record = ansible.start_run(hostid, target)
+        record = ansible.start_run(hostid, target, visible_name)
         self._send_json(200, record)
 
     def log_message(self, fmt, *args):

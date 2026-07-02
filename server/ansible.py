@@ -1,22 +1,25 @@
 """Ansible playbook runner used by the host detail "Ansible" button.
 
 Flow:
-  start_run(hostid, target) -> spawns a background thread that runs the ansible
-    script over ssh, immediately marking the host "running" in redis.
+  start_run(hostid, target, visible_name) -> spawns a background thread that
+    runs the ansible script over ssh, immediately marking the host "running"
+    in redis.
   get_status(hostid)        -> the stored record for that host.
 
 The record is stored in redis under ansible:status:<hostid> as JSON:
-  {status, target, output, started_at, finished_at}
+  {status, target, visible_name, output, started_at, finished_at}
 where status is one of: running | ok | failed | none.
 
-The script is run over ssh as:  ANSIBLE_SCRIPT <target>  on ANSIBLE_SSH_HOST.
-With ANSIBLE_MOCK=1 (the default) the ssh call is skipped and a canned
-playbook run is returned instead, so the feature works without a real server.
+The script is run over ssh as:  ANSIBLE_SCRIPT <target> <visible_name>  on
+ANSIBLE_SSH_HOST. With ANSIBLE_MOCK=1 (the default) the ssh call is skipped and
+a canned playbook run is returned instead, so the feature works without a real
+server.
 """
 
 import json
 import os
 import re
+import shlex
 import subprocess
 import threading
 import time
@@ -65,25 +68,28 @@ def parse_status(output):
     return "ok" if fails and all(n == "0" for n in fails) else "failed"
 
 
-def _run_script(target):
+def _run_script(target, visible_name):
     if ANSIBLE_MOCK:
         # Simulate the playbook taking a little while so the UI shows "running".
         time.sleep(3)
         return MOCK_OUTPUT
+    # Pass both the inventory target and the host's visible name as arguments,
+    # quoting each so spaces in the visible name don't split into extra args.
+    remote_cmd = f"{ANSIBLE_SCRIPT} {shlex.quote(visible_name)}"
     cmd = [
         "ssh",
         "-o",
         "StrictHostKeyChecking=no",
         f"{ANSIBLE_SSH_LOGIN}@{ANSIBLE_SSH_HOST}",
-        f"{ANSIBLE_SCRIPT} {target}",
+        remote_cmd,
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     return proc.stdout + proc.stderr
 
 
-def _job(hostid, target, record):
+def _job(hostid, target, visible_name, record):
     try:
-        output = _run_script(target)
+        output = _run_script(target, visible_name)
         status = parse_status(output)
     except Exception as e:  # surface any failure to the UI
         output = f"error running ansible: {e}"
@@ -92,7 +98,7 @@ def _job(hostid, target, record):
     _save(hostid, record)
 
 
-def start_run(hostid, target):
+def start_run(hostid, target, visible_name=""):
     current = get_status(hostid)
     if current.get("status") == "running":
         return current  # don't start a second run while one is in flight
@@ -100,13 +106,16 @@ def start_run(hostid, target):
     record = {
         "status": "running",
         "target": target,
+        "visible_name": visible_name,
         "output": "",
         "started_at": _now(),
         "finished_at": None,
     }
     _save(hostid, record)
     threading.Thread(
-        target=_job, args=(hostid, target, record), daemon=True
+        target=_job,
+        args=(hostid, target, visible_name, record),
+        daemon=True,
     ).start()
     return record
 

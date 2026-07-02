@@ -4,13 +4,13 @@
 //   curl http://localhost:3014/data
 //   curl -X POST http://localhost:3014/data -d '[{"hostA":"10823","hostB":"10747"}]'
 //
-// The browser calls the python data server directly; configure its base URL
-// via DATA_URL in .docker/.env (e.g. http://localhost:3014). The whole file
-// (data.json) is a list of undirected host pairs — each relation is stored
-// once as { hostA, hostB }.
+// The browser calls the python data server through nginx, which proxies the
+// `/api/` location to the python container (see .docker/nginx/conf.d/app.conf).
+// The whole file (data.json) is a list of undirected host pairs — each relation
+// is stored once as { hostA, hostB }.
 
 const DATA_URL = import.meta.env.DATA_URL ?? "http://localhost";
-const RELATIONS_URL = `${DATA_URL}/data`;
+const RELATIONS_URL = `${DATA_URL}/api/data`;
 
 export interface HostPair {
   hostA: string;

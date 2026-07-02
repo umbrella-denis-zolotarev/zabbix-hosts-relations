@@ -39,6 +39,12 @@ console-node:
 logs-node:
 	$(DOCKER_COMPOSE_CMD) logs --tail=100 -f node
 
+console-nginx:
+	$(DOCKER_COMPOSE_CMD) exec nginx sh
+
+logs-nginx:
+	$(DOCKER_COMPOSE_CMD) logs --tail=100 -f nginx
+
 console-redis:
 	$(DOCKER_COMPOSE_CMD) exec redis redis-cli
 

@@ -13,8 +13,8 @@ services:
       - ../server:/server
     env_file:
       - ./.env
-    ports:
-      - ${SERVER_PORT_PUBLIC}:8000
+    #ports:
+    #  - ${SERVER_PORT_PUBLIC}:8000
     working_dir: /server
     command: python main.py
     depends_on:
@@ -37,3 +37,5 @@ services:
       - ./nginx/conf.d/app.conf:/etc/nginx/conf.d/default.conf
     ports:
       - ${NGINX_PORT_PUBLIC}:80
+    depends_on:
+      - python

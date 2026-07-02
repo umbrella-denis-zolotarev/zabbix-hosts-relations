@@ -26,6 +26,9 @@ dist-ssr
 # docker
 /.docker/.env
 
+# python
+/server/__pycache__
+
 # tmp
 tmp/
 

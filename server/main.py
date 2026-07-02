@@ -1,18 +1,23 @@
 """Minimal hello-world server to verify the python container is running.
 
 Endpoints:
-  GET  /        -> Hello, World!
-  POST /data    -> save the JSON request body to data.json
-  GET  /data    -> return the saved data.json contents
-  POST /zabbix  -> proxy a JSON-RPC request to the Zabbix API (token added
-                   server-side, so the browser never sees it)
+  GET  /                 -> Hello, World!
+  POST /data             -> save the JSON request body to data.json
+  GET  /data             -> return the saved data.json contents
+  POST /zabbix           -> proxy a JSON-RPC request to the Zabbix API (token
+                            added server-side, so the browser never sees it)
+  POST /ansible/run      -> start the ansible script for a host (background)
+  GET  /ansible/status   -> the last ansible run status/output for a host
 """
 
 import json
 import os
 import urllib.error
 import urllib.request
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
+
+import ansible
 
 HOST = "0.0.0.0"
 PORT = 8000
@@ -50,6 +55,16 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        parsed = urlparse(self.path)
+
+        if parsed.path == "/ansible/status":
+            hostid = (parse_qs(parsed.query).get("hostid") or [""])[0]
+            if not hostid:
+                self._send_json(400, {"error": "hostid required"})
+                return
+            self._send_json(200, ansible.get_status(hostid))
+            return
+
         if self.path == "/data":
             if not os.path.exists(DATA_FILE):
                 self._send_json(404, {"error": "no data saved yet"})
@@ -68,6 +83,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path == "/zabbix":
             self._proxy_zabbix()
+            return
+
+        if self.path == "/ansible/run":
+            self._run_ansible()
             return
 
         if self.path != "/data":
@@ -120,11 +139,30 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _run_ansible(self):
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length) if length else b""
+        try:
+            body = json.loads(raw) if raw else {}
+        except json.JSONDecodeError as e:
+            self._send_json(400, {"error": f"invalid JSON: {e}"})
+            return
+
+        hostid = str(body.get("hostid") or "")
+        if not hostid:
+            self._send_json(400, {"error": "hostid required"})
+            return
+        # The ansible inventory target (e.g. "r0"); falls back to the host id.
+        target = str(body.get("target") or hostid)
+
+        record = ansible.start_run(hostid, target)
+        self._send_json(200, record)
+
     def log_message(self, fmt, *args):
         print("%s - %s" % (self.address_string(), fmt % args))
 
 
 if __name__ == "__main__":
-    server = HTTPServer((HOST, PORT), Handler)
+    server = ThreadingHTTPServer((HOST, PORT), Handler)
     print(f"Listening on http://{HOST}:{PORT}")
     server.serve_forever()

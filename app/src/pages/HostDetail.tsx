@@ -20,6 +20,7 @@ import {
   ArrowLeftOutlined,
   CodeOutlined,
   LineChartOutlined,
+  PlayCircleOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
@@ -37,6 +38,12 @@ import {
   setHostRelations,
   type HostPair,
 } from "../relations";
+import {
+  getAnsibleStatus,
+  runAnsible,
+  type AnsibleState,
+  type AnsibleStatus,
+} from "../ansible";
 
 const INTERFACE_TYPE: Record<string, string> = {
   "1": "Agent",
@@ -90,6 +97,22 @@ function resolveHostIp(host: ZabbixHostDetail | null): string | null {
   return candidate?.ip ?? null;
 }
 
+const ANSIBLE_STATUS_META: Record<AnsibleState, { label: string; color: string }> = {
+  none: { label: "never run", color: "#b0b0b0" },
+  running: { label: "running…", color: "#1677ff" },
+  ok: { label: "ok", color: "#52c41a" },
+  failed: { label: "failed", color: "#ff4d4f" },
+};
+
+// One-line "<status> · <when>" summary shown inside the Ansible button.
+function ansibleSummary(s: AnsibleStatus): string {
+  const meta = ANSIBLE_STATUS_META[s.status] ?? ANSIBLE_STATUS_META.none;
+  if (s.status === "none") return meta.label;
+  const ts = s.finished_at || s.started_at;
+  const when = ts ? new Date(ts).toLocaleString() : "";
+  return when ? `${meta.label} · ${when}` : meta.label;
+}
+
 function HostDetail() {
   const { hostid } = useParams<{ hostid: string }>();
   const navigate = useNavigate();
@@ -103,6 +126,10 @@ function HostDetail() {
   const [modalOpen, setModalOpen] = useState(false);
   const [selected, setSelected] = useState<number[]>([]);
   const [saving, setSaving] = useState(false);
+
+  // Ansible run state.
+  const [ansible, setAnsible] = useState<AnsibleStatus>({ status: "none" });
+  const [ansibleStarting, setAnsibleStarting] = useState(false);
 
   const load = async () => {
     if (!hostid) return;
@@ -128,6 +155,37 @@ function HostDetail() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hostid]);
+
+  // Load the last ansible run status when the host changes.
+  useEffect(() => {
+    if (!hostid) return;
+    getAnsibleStatus(hostid).then(setAnsible).catch(() => {});
+  }, [hostid]);
+
+  // While a run is in progress, poll the status endpoint until it finishes.
+  useEffect(() => {
+    if (!hostid || ansible.status !== "running") return;
+    const id = window.setInterval(() => {
+      getAnsibleStatus(hostid).then(setAnsible).catch(() => {});
+    }, 2000);
+    return () => window.clearInterval(id);
+  }, [hostid, ansible.status]);
+
+  const runPlaybook = async () => {
+    if (!hostid) return;
+    setAnsibleStarting(true);
+    setError(null);
+    try {
+      // The ansible inventory target — the host's technical name (e.g. "r0").
+      const target = host?.host || hostid;
+      const status = await runAnsible(hostid, target);
+      setAnsible(status);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAnsibleStarting(false);
+    }
+  };
 
   // Relations of the current host (as numeric hostids).
   const currentRelations = hostid ? relationsForHost(relations, hostid) : [];
@@ -195,6 +253,30 @@ function HostDetail() {
           </Typography.Title>
         </Space>
         <Space>
+          <Button
+            icon={<PlayCircleOutlined />}
+            onClick={runPlaybook}
+            loading={ansibleStarting || ansible.status === "running"}
+            disabled={!host || ansible.status === "running"}
+            title={
+              ansible.status === "running"
+                ? "Ansible playbook is running"
+                : "Run the ansible playbook for this host"
+            }
+            style={{ height: "auto", paddingTop: 4, paddingBottom: 4 }}
+          >
+            <Flex vertical align="flex-start" style={{ lineHeight: 1.2 }}>
+              <span>Ansible</span>
+              <span
+                style={{
+                  fontSize: 12,
+                  color: ANSIBLE_STATUS_META[ansible.status]?.color,
+                }}
+              >
+                {ansibleSummary(ansible)}
+              </span>
+            </Flex>
+          </Button>
           <Button
             icon={<ApartmentOutlined />}
             onClick={openModal}

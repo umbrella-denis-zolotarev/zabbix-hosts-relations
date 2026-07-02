@@ -1,18 +1,30 @@
 """Minimal hello-world server to verify the python container is running.
 
 Endpoints:
-  GET  /       -> Hello, World!
-  POST /data   -> save the JSON request body to data.json
-  GET  /data   -> return the saved data.json contents
+  GET  /        -> Hello, World!
+  POST /data    -> save the JSON request body to data.json
+  GET  /data    -> return the saved data.json contents
+  POST /zabbix  -> proxy a JSON-RPC request to the Zabbix API (token added
+                   server-side, so the browser never sees it)
 """
 
 import json
 import os
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 HOST = "0.0.0.0"
 PORT = 8000
 DATA_FILE = os.path.join(os.path.dirname(__file__), "data.json")
+
+# Zabbix JSON-RPC proxy target. The token is read from the container env so it
+# stays server-side and is never shipped to the browser bundle.
+ZABBIX_URL = os.environ.get("ZABBIX_URL", "http://localhost")
+ZABBIX_API_URL = f"{ZABBIX_URL}/zabbix/api_jsonrpc.php"
+ZABBIX_TOKEN = os.environ.get("ZABBIX_API_TOKEN") or os.environ.get(
+    "VITE_ZABBIX_TOKEN", ""
+)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -54,6 +66,10 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(b"Hello, World!\n")
 
     def do_POST(self):
+        if self.path == "/zabbix":
+            self._proxy_zabbix()
+            return
+
         if self.path != "/data":
             self._send_json(404, {"error": "not found"})
             return
@@ -70,6 +86,39 @@ class Handler(BaseHTTPRequestHandler):
             json.dump(data, f, indent=2)
 
         self._send_json(200, {"saved": True, "data": data})
+
+    def _proxy_zabbix(self):
+        # Forward the raw JSON-RPC body to the Zabbix API, injecting the auth
+        # token here so it never leaves the server.
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length) if length else b""
+
+        req = urllib.request.Request(
+            ZABBIX_API_URL,
+            data=raw,
+            method="POST",
+            headers={
+                "Content-Type": "application/json-rpc",
+                "Authorization": f"Bearer {ZABBIX_TOKEN}",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                body = resp.read()
+                status = resp.status
+        except urllib.error.HTTPError as e:
+            body = e.read()
+            status = e.code
+        except urllib.error.URLError as e:
+            self._send_json(502, {"error": f"zabbix unreachable: {e.reason}"})
+            return
+
+        self.send_response(status)
+        self._send_cors()
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def log_message(self, fmt, *args):
         print("%s - %s" % (self.address_string(), fmt % args))

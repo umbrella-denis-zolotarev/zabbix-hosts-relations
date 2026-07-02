@@ -1,18 +1,14 @@
 // Zabbix JSON-RPC client.
 //
-// Mirrors:
-//   curl -s -X POST -H "Content-Type: application/json-rpc" \
-//     -H "Authorization: Bearer <token>" \
-//     http://192.168.4.56/zabbix/api_jsonrpc.php \
-//     -d '{"jsonrpc":"2.0","method":"host.get","params":{"output":["hostid","host","name","status"]},"id":1}'
-//
-// The browser calls the Zabbix server directly. Configure the base URL and
-// token via ZABBIX_URL and VITE_ZABBIX_TOKEN in .docker/.env. (The Zabbix
-// server must allow CORS from this app's origin.)
+// The browser POSTs JSON-RPC to the python proxy at `/api/zabbix` (nginx
+// forwards `/api/` to the python container). The proxy injects the auth token
+// server-side and relays the request to the real Zabbix API, so the token is
+// never shipped to the browser and there is no cross-origin call to Zabbix.
+// Configure ZABBIX_URL and ZABBIX_TOKEN for the python container in
+// .docker/.env.
 
-const ZABBIX_URL = import.meta.env.ZABBIX_URL ?? "http://localhost";
-const API_URL = `${ZABBIX_URL}/zabbix/api_jsonrpc.php`;
-const API_TOKEN = import.meta.env.VITE_ZABBIX_TOKEN ?? "";
+const DATA_URL = import.meta.env.DATA_URL ?? "http://localhost";
+const API_URL = `${DATA_URL}/api/zabbix`;
 
 export interface ZabbixHost {
   hostid: string;
@@ -56,8 +52,7 @@ async function call<T>(method: string, params: unknown): Promise<T> {
   const res = await fetch(API_URL, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json-rpc",
-      Authorization: `Bearer ${API_TOKEN}`,
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({
       jsonrpc: "2.0",

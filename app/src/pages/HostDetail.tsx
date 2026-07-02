@@ -19,6 +19,7 @@ import {
   ApartmentOutlined,
   ArrowLeftOutlined,
   CodeOutlined,
+  LineChartOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
@@ -175,6 +176,13 @@ function HostDetail() {
     window.location.href = `ssh://${sshLogin}@${sshIp}`;
   };
 
+  const zabbixUrl = import.meta.env.ZABBIX_URL ?? "http://localhost";
+  const openCharts = () => {
+    if (!hostid) return;
+    const url = `${zabbixUrl}/zabbix/zabbix.php?action=charts.view&filter_hostids%5B0%5D=${hostid}&filter_show=1&filter_set=1`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
   return (
     <Flex vertical gap="middle" style={{ padding: 24 }}>
       <Flex align="center" justify="space-between" gap="middle">
@@ -206,6 +214,11 @@ function HostDetail() {
           >
             SSH
           </Button>
+          <Button
+            icon={<LineChartOutlined />}
+            onClick={openCharts}
+            disabled={!hostid}
+          />
           <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>
             Refresh
           </Button>

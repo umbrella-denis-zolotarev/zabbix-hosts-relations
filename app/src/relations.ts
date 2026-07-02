@@ -1,36 +1,61 @@
 // Client for the python relations server.
 //
-// Mirrors:
-//   curl http://localhost:3014/data
-//   curl -X POST http://localhost:3014/data -d '[{"hostA":"10823","hostB":"10747"}]'
-//
 // The browser calls the python data server through nginx, which proxies the
 // `/api/` location to the python container (see .docker/nginx/conf.d/app.conf).
-// The whole file (data.json) is a list of undirected host pairs — each relation
-// is stored once as { hostA, hostB }.
+// data.json is a list of undirected host links. Each link connects a port on
+// one host to a port on another:
+//   { hostA, hostAport, hostB, hostBport }
+// A given (host, port) endpoint may be used by at most one link — one port is
+// used once.
 
 const DATA_URL = import.meta.env.DATA_URL ?? "http://localhost";
 const RELATIONS_URL = `${DATA_URL}/api/data`;
 
 export interface HostPair {
   hostA: string;
+  hostAport: string;
   hostB: string;
+  hostBport: string;
 }
 
-// Canonicalize a list of pairs: drop empty/self pairs, store each undirected
-// edge once with the smaller hostid as hostA, and sort deterministically.
+// A link seen from one host's perspective.
+export interface HostRelation {
+  hostid: number; // the related host
+  port: string; // this host's port
+  relatedPort: string; // the related host's port
+}
+
+// Order a link's endpoints deterministically (smaller hostid first, ties broken
+// by port), keeping each endpoint's port attached to its host.
+function orderPair(p: HostPair): HostPair {
+  const aFirst =
+    Number(p.hostA) < Number(p.hostB) ||
+    (p.hostA === p.hostB && Number(p.hostAport) <= Number(p.hostBport));
+  return aFirst
+    ? p
+    : { hostA: p.hostB, hostAport: p.hostBport, hostB: p.hostA, hostBport: p.hostAport };
+}
+
+// Canonicalize: drop incomplete/self links, order endpoints, drop exact
+// duplicates, and sort deterministically.
 function normalizePairs(pairs: HostPair[]): HostPair[] {
   const seen = new Map<string, HostPair>();
-  for (const p of pairs ?? []) {
-    const a = String(p?.hostA ?? "");
-    const b = String(p?.hostB ?? "");
-    if (!a || !b || a === b) continue;
-    const [hostA, hostB] = Number(a) <= Number(b) ? [a, b] : [b, a];
-    seen.set(`${hostA}|${hostB}`, { hostA, hostB });
+  for (const raw of pairs ?? []) {
+    const hostA = String(raw?.hostA ?? "");
+    const hostAport = String(raw?.hostAport ?? "");
+    const hostB = String(raw?.hostB ?? "");
+    const hostBport = String(raw?.hostBport ?? "");
+    if (!hostA || !hostB || !hostAport || !hostBport || hostA === hostB) continue;
+    const p = orderPair({ hostA, hostAport, hostB, hostBport });
+    const key = `${p.hostA}:${p.hostAport}|${p.hostB}:${p.hostBport}`;
+    seen.set(key, p);
   }
   return [...seen.values()].sort(
     (x, y) =>
-      Number(x.hostA) - Number(y.hostA) || Number(x.hostB) - Number(y.hostB),
+      Number(x.hostA) - Number(y.hostA) ||
+      Number(x.hostAport) - Number(y.hostAport) ||
+      Number(x.hostB) - Number(y.hostB) ||
+      Number(x.hostBport) - Number(y.hostBport),
   );
 }
 
@@ -52,30 +77,90 @@ export async function saveRelations(pairs: HostPair[]): Promise<void> {
   if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
 }
 
-// The hostids related to a given host (relations are two-sided by nature: a
-// pair { hostA, hostB } links both directions).
-export function relationsForHost(pairs: HostPair[], hostid: string): number[] {
+// The links of a given host (relations are two-sided: a link connects both
+// directions), from that host's point of view.
+export function relationsForHost(
+  pairs: HostPair[],
+  hostid: string,
+): HostRelation[] {
   const host = String(hostid);
-  const out = new Set<number>();
+  const out: HostRelation[] = [];
   for (const p of pairs) {
-    if (p.hostA === host) out.add(Number(p.hostB));
-    else if (p.hostB === host) out.add(Number(p.hostA));
+    if (p.hostA === host) {
+      out.push({ hostid: Number(p.hostB), port: p.hostAport, relatedPort: p.hostBport });
+    } else if (p.hostB === host) {
+      out.push({ hostid: Number(p.hostA), port: p.hostBport, relatedPort: p.hostAport });
+    }
   }
-  return [...out].sort((a, b) => a - b);
+  return out.sort(
+    (x, y) => Number(x.port) - Number(y.port) || x.hostid - y.hostid,
+  );
 }
 
-// Set the relations for a single host authoritatively: drop every pair that
-// involves this host, then add a pair for each currently selected host.
+// Validate a proposed set of links for `hostid`. Enforces "one port used once"
+// across this host's own ports and the related endpoints, taking into account
+// the links of other hosts that will be kept. Returns an error string, or null.
+export function validateHostRelations(
+  pairs: HostPair[],
+  hostid: string,
+  links: HostRelation[],
+): string | null {
+  const host = String(hostid);
+
+  // Endpoints already used by links that don't involve this host (kept as-is).
+  const taken = new Set<string>();
+  for (const p of pairs) {
+    if (p.hostA === host || p.hostB === host) continue;
+    taken.add(`${p.hostA}:${p.hostAport}`);
+    taken.add(`${p.hostB}:${p.hostBport}`);
+  }
+
+  const localPorts = new Set<string>();
+  const relatedEndpoints = new Set<string>();
+  for (const l of links) {
+    if (!l.hostid || l.port === "" || l.relatedPort === "") {
+      return "Every relation needs a port, a related host, and a related host port.";
+    }
+    if (String(l.hostid) === host) return "A host can't be related to itself.";
+
+    if (localPorts.has(l.port)) {
+      return `Port ${l.port} is used more than once on this host.`;
+    }
+    localPorts.add(l.port);
+    if (taken.has(`${host}:${l.port}`)) {
+      return `Port ${l.port} on this host is already used by another relation.`;
+    }
+
+    const relEp = `${l.hostid}:${l.relatedPort}`;
+    if (relatedEndpoints.has(relEp)) {
+      return `Port ${l.relatedPort} on host #${l.hostid} is used more than once.`;
+    }
+    relatedEndpoints.add(relEp);
+    if (taken.has(relEp)) {
+      return `Port ${l.relatedPort} on host #${l.hostid} is already used by another relation.`;
+    }
+  }
+  return null;
+}
+
+// Set the links for a single host authoritatively: drop every link that
+// involves this host, then add one per provided relation.
 export function setHostRelations(
   pairs: HostPair[],
   hostid: string,
-  relations: number[],
+  links: HostRelation[],
 ): HostPair[] {
   const host = String(hostid);
-  const target = new Set(relations.map(String));
-  target.delete(host); // a host can't relate to itself
-
   const kept = pairs.filter((p) => p.hostA !== host && p.hostB !== host);
-  const added: HostPair[] = [...target].map((n) => ({ hostA: host, hostB: n }));
+  const added: HostPair[] = links
+    .filter(
+      (l) => l.hostid && l.port !== "" && l.relatedPort !== "" && String(l.hostid) !== host,
+    )
+    .map((l) => ({
+      hostA: host,
+      hostAport: String(l.port),
+      hostB: String(l.hostid),
+      hostBport: String(l.relatedPort),
+    }));
   return normalizePairs([...kept, ...added]);
 }

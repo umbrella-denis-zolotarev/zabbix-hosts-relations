@@ -7,6 +7,7 @@ import {
   Descriptions,
   Empty,
   Flex,
+  Input,
   Modal,
   Select,
   Skeleton,
@@ -21,7 +22,9 @@ import {
   CodeOutlined,
   FileTextOutlined,
   LineChartOutlined,
+  MinusCircleOutlined,
   PlayCircleOutlined,
+  PlusOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
@@ -37,7 +40,9 @@ import {
   relationsForHost,
   saveRelations,
   setHostRelations,
+  validateHostRelations,
   type HostPair,
+  type HostRelation,
 } from "../relations";
 import {
   getAnsibleStatus,
@@ -123,9 +128,10 @@ function HostDetail() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Relations modal state.
+  // Relations modal state. Each row is one editable link from this host's side:
+  // this host's port, the related host, and the related host's port.
   const [modalOpen, setModalOpen] = useState(false);
-  const [selected, setSelected] = useState<number[]>([]);
+  const [rows, setRows] = useState<HostRelation[]>([]);
   const [saving, setSaving] = useState(false);
 
   // Ansible run state.
@@ -198,16 +204,43 @@ function HostDetail() {
   };
 
   const openModal = () => {
-    setSelected(currentRelations);
+    setError(null);
+    setRows(currentRelations.map((r) => ({ ...r })));
     setModalOpen(true);
+  };
+
+  const updateRow = (index: number, patch: Partial<HostRelation>) => {
+    setRows((prev) =>
+      prev.map((r, i) => (i === index ? { ...r, ...patch } : r)),
+    );
+  };
+
+  const addRow = () => {
+    setRows((prev) => [...prev, { port: "", hostid: 0, relatedPort: "" }]);
+  };
+
+  const removeRow = (index: number) => {
+    setRows((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleSave = async () => {
     if (!hostid) return;
+    const links: HostRelation[] = rows.map((r) => ({
+      hostid: Number(r.hostid) || 0,
+      port: String(r.port).trim(),
+      relatedPort: String(r.relatedPort).trim(),
+    }));
+
+    const validationError = validateHostRelations(relations, hostid, links);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
     setSaving(true);
     setError(null);
     try {
-      const next = setHostRelations(relations, hostid, selected);
+      const next = setHostRelations(relations, hostid, links);
       await saveRelations(next);
       setRelations(next);
       setModalOpen(false);
@@ -401,15 +434,19 @@ function HostDetail() {
         >
           {currentRelations.length ? (
             <Space direction="vertical" size="small" style={{ width: "100%" }}>
-              {currentRelations.map((id) => (
-                <Tag
-                  key={id}
-                  color="blue"
-                  style={{ cursor: "pointer" }}
-                  onClick={() => navigate(`/hosts/${id}`)}
-                >
-                  {hostName(id)} (#{id})
-                </Tag>
+              {currentRelations.map((r, i) => (
+                <Space key={i} size="small" wrap>
+                  <Tag>port {r.port}</Tag>
+                  <span>→</span>
+                  <Tag
+                    color="blue"
+                    style={{ cursor: "pointer" }}
+                    onClick={() => navigate(`/hosts/${r.hostid}`)}
+                  >
+                    {hostName(r.hostid)} (#{r.hostid})
+                  </Tag>
+                  <Tag>port {r.relatedPort}</Tag>
+                </Space>
               ))}
             </Space>
           ) : (
@@ -428,21 +465,68 @@ function HostDetail() {
         onCancel={() => setModalOpen(false)}
         confirmLoading={saving}
         okText="Save"
+        width={640}
         destroyOnClose
       >
         <Typography.Paragraph type="secondary">
-          Select the hosts related to this one.
+          Link a port on this host to a port on another host. Each port can be
+          used by only one relation.
         </Typography.Paragraph>
-        <Select
-          mode="multiple"
-          allowClear
-          style={{ width: "100%" }}
-          placeholder="Select related hosts…"
-          value={selected}
-          onChange={setSelected}
-          options={otherHostOptions}
-          optionFilterProp="label"
-        />
+
+        {rows.length ? (
+          <Space direction="vertical" size="small" style={{ width: "100%" }}>
+            <Flex gap="small" style={{ fontSize: 12, opacity: 0.65 }}>
+              <span style={{ width: 90 }}>Port</span>
+              <span style={{ flex: 1 }}>Related host</span>
+              <span style={{ width: 110 }}>Related port</span>
+              <span style={{ width: 24 }} />
+            </Flex>
+            {rows.map((row, i) => (
+              <Flex key={i} gap="small" align="center">
+                <Input
+                  style={{ width: 90 }}
+                  placeholder="80"
+                  value={row.port}
+                  onChange={(e) => updateRow(i, { port: e.target.value })}
+                />
+                <Select
+                  style={{ flex: 1 }}
+                  showSearch
+                  placeholder="Select host…"
+                  value={row.hostid || undefined}
+                  onChange={(v) => updateRow(i, { hostid: v })}
+                  options={otherHostOptions}
+                  optionFilterProp="label"
+                />
+                <Input
+                  style={{ width: 110 }}
+                  placeholder="81"
+                  value={row.relatedPort}
+                  onChange={(e) => updateRow(i, { relatedPort: e.target.value })}
+                />
+                <MinusCircleOutlined
+                  style={{ width: 24, cursor: "pointer", opacity: 0.7 }}
+                  onClick={() => removeRow(i)}
+                />
+              </Flex>
+            ))}
+          </Space>
+        ) : (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description="No relations"
+          />
+        )}
+
+        <Button
+          type="dashed"
+          icon={<PlusOutlined />}
+          onClick={addRow}
+          block
+          style={{ marginTop: 12 }}
+        >
+          Add relation
+        </Button>
       </Modal>
 
       <Modal

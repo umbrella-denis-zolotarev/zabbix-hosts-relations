@@ -10,7 +10,7 @@ The record is stored in redis under ansible:status:<hostid> as JSON:
   {status, target, visible_name, output, started_at, finished_at}
 where status is one of: running | ok | failed | none.
 
-The script is run over ssh as:  ANSIBLE_SCRIPT <target> <visible_name>  on
+The script is run over ssh as:  ANSIBLE_SCRIPT <target>  on
 ANSIBLE_SSH_HOST. With ANSIBLE_MOCK=1 (the default) the ssh call is skipped and
 a canned playbook run is returned instead, so the feature works without a real
 server.
@@ -76,7 +76,7 @@ def _run_script(target, visible_name):
         return MOCK_OUTPUT
     # Pass both the inventory target and the host's visible name as arguments,
     # quoting each so spaces in the visible name don't split into extra args.
-    remote_cmd = f"{ANSIBLE_SCRIPT} {shlex.quote(visible_name)}"
+    remote_cmd = f"{ANSIBLE_SCRIPT} {shlex.quote(target)}"
     ssh_cmd = [
         "ssh",
         "-o",

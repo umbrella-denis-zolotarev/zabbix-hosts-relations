@@ -33,6 +33,7 @@ REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
 ANSIBLE_MOCK = os.environ.get("ANSIBLE_MOCK", "1") not in ("", "0", "false", "False")
 ANSIBLE_SSH_HOST = os.environ.get("ANSIBLE_SSH_HOST", "")
 ANSIBLE_SSH_LOGIN = os.environ.get("ANSIBLE_SSH_LOGIN", "")
+ANSIBLE_SSH_PASSWORD = os.environ.get("ANSIBLE_SSH_PASSWORD", "")
 ANSIBLE_SCRIPT = os.environ.get(
     "ANSIBLE_SCRIPT", "/home/sysadm/ansible_quickstart/run.sh"
 )
@@ -76,14 +77,27 @@ def _run_script(target, visible_name):
     # Pass both the inventory target and the host's visible name as arguments,
     # quoting each so spaces in the visible name don't split into extra args.
     remote_cmd = f"{ANSIBLE_SCRIPT} {shlex.quote(visible_name)}"
-    cmd = [
+    ssh_cmd = [
         "ssh",
         "-o",
         "StrictHostKeyChecking=no",
         f"{ANSIBLE_SSH_LOGIN}@{ANSIBLE_SSH_HOST}",
         remote_cmd,
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+
+    env = os.environ.copy()
+    if ANSIBLE_SSH_PASSWORD:
+        # Feed the password to ssh via sshpass. Using "-e" (SSHPASS env var)
+        # instead of "-p" keeps the password out of the process list.
+        cmd = ["sshpass", "-e", *ssh_cmd]
+        env["SSHPASS"] = ANSIBLE_SSH_PASSWORD
+    else:
+        # No password configured: rely on key-based auth.
+        cmd = ssh_cmd
+
+    proc = subprocess.run(
+        cmd, capture_output=True, text=True, timeout=600, env=env
+    )
     return proc.stdout + proc.stderr
 
 

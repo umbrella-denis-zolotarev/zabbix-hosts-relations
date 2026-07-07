@@ -35,6 +35,18 @@ const columns: ColumnsType<ZabbixHost> = [
     sorter: (a, b) => a.name.localeCompare(b.name),
   },
   {
+    title: "Groups",
+    dataIndex: "groups",
+    key: "groups",
+    render: (groups: ZabbixHost["groups"]) => (
+      <Space size={[0, 4]} wrap>
+        {(groups ?? []).map((g) => (
+          <Tag key={g.groupid}>{g.name}</Tag>
+        ))}
+      </Space>
+    ),
+  },
+  {
     title: "Status",
     dataIndex: "status",
     key: "status",
@@ -82,7 +94,9 @@ function HostList() {
     const q = search.trim().toLowerCase();
     if (!q) return hosts;
     return hosts.filter((h) =>
-      [h.hostid, h.host, h.name].some((v) => v.toLowerCase().includes(q)),
+      [h.hostid, h.host, h.name, ...(h.groups ?? []).map((g) => g.name)].some(
+        (v) => v.toLowerCase().includes(q),
+      ),
     );
   }, [hosts, search]);
 

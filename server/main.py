@@ -31,6 +31,87 @@ ZABBIX_TOKEN = os.environ.get("ZABBIX_API_TOKEN") or os.environ.get(
     "VITE_ZABBIX_TOKEN", ""
 )
 
+# Optional allowlist: only hosts in these Zabbix host groups are exposed. The
+# group names are read from ZABBIX_GROUPS in the env, separated by "|" (e.g.
+# "Linux servers|Routers"). When set, every host.get proxied below is scoped to
+# these groups server-side, so the browser can't ask for hosts outside them.
+ZABBIX_GROUPS = [g.strip() for g in os.environ.get("ZABBIX_GROUPS", "").split("|") if g.strip()]
+
+# Cache of the resolved group ids so we don't re-query hostgroup.get on every
+# request. Only populated once a non-empty result comes back, so a transient
+# Zabbix outage doesn't get cached as "no groups".
+_allowed_group_ids_cache = None
+
+
+def _zabbix_fetch(raw):
+    """POST a raw JSON-RPC body to Zabbix; return (status, body_bytes).
+
+    Injects the auth token here so it never leaves the server. Raises
+    urllib.error.URLError if Zabbix is unreachable.
+    """
+    req = urllib.request.Request(
+        ZABBIX_API_URL,
+        data=raw,
+        method="POST",
+        headers={
+            "Content-Type": "application/json-rpc",
+            "Authorization": f"Bearer {ZABBIX_TOKEN}",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return resp.status, resp.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+
+
+def _allowed_group_ids():
+    """Resolve ZABBIX_GROUPS names to group ids, or None if no allowlist is set."""
+    global _allowed_group_ids_cache
+    if not ZABBIX_GROUPS:
+        return None
+    if _allowed_group_ids_cache is not None:
+        return _allowed_group_ids_cache
+
+    payload = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "method": "hostgroup.get",
+            "params": {"output": ["groupid"], "filter": {"name": ZABBIX_GROUPS}},
+            "id": 0,
+        }
+    ).encode("utf-8")
+    status, body = _zabbix_fetch(payload)
+    try:
+        result = json.loads(body).get("result") or []
+    except (json.JSONDecodeError, AttributeError):
+        result = []
+    group_ids = [g["groupid"] for g in result]
+    # Cache only a successful, non-empty lookup so transient failures retry.
+    if group_ids:
+        _allowed_group_ids_cache = group_ids
+    return group_ids
+
+
+def _scope_host_get(raw):
+    """If the body is a host.get call and an allowlist is set, inject groupids."""
+    if not ZABBIX_GROUPS:
+        return raw
+    try:
+        payload = json.loads(raw) if raw else {}
+    except json.JSONDecodeError:
+        return raw
+    if not isinstance(payload, dict) or payload.get("method") != "host.get":
+        return raw
+
+    params = payload.get("params")
+    if not isinstance(params, dict):
+        params = {}
+    # Override rather than merge: the allowlist is authoritative.
+    params["groupids"] = _allowed_group_ids()
+    payload["params"] = params
+    return json.dumps(payload).encode("utf-8")
+
 
 class Handler(BaseHTTPRequestHandler):
     def _send_cors(self):
@@ -112,22 +193,10 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length) if length else b""
 
-        req = urllib.request.Request(
-            ZABBIX_API_URL,
-            data=raw,
-            method="POST",
-            headers={
-                "Content-Type": "application/json-rpc",
-                "Authorization": f"Bearer {ZABBIX_TOKEN}",
-            },
-        )
+        # Scope host.get calls to the ZABBIX_GROUPS allowlist (no-op otherwise).
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                body = resp.read()
-                status = resp.status
-        except urllib.error.HTTPError as e:
-            body = e.read()
-            status = e.code
+            raw = _scope_host_get(raw)
+            status, body = _zabbix_fetch(raw)
         except urllib.error.URLError as e:
             self._send_json(502, {"error": f"zabbix unreachable: {e.reason}"})
             return

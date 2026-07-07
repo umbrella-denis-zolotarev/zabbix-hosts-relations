@@ -15,6 +15,7 @@ export interface ZabbixHost {
   host: string;
   name: string;
   status: string; // "0" = monitored (enabled), "1" = not monitored (disabled)
+  groups?: ZabbixGroup[];
 }
 
 export interface ZabbixInterface {
@@ -76,6 +77,7 @@ async function call<T>(method: string, params: unknown): Promise<T> {
 export function getHosts(): Promise<ZabbixHost[]> {
   return call<ZabbixHost[]>("host.get", {
     output: ["hostid", "host", "name", "status"],
+    selectGroups: ["groupid", "name"],
   });
 }
 

@@ -343,10 +343,10 @@ function RelationsMap({ pairs, hosts, onSelect }: Props) {
               />
               <text
                 x={n.x}
-                y={n.y + n.r + 16}
+                y={n.y + n.r + 22}
                 textAnchor="middle"
                 dominantBaseline="middle"
-                fontSize={13}
+                fontSize={26}
                 fill={token.colorText}
                 style={labelHalo}
               >

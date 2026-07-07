@@ -74,11 +74,22 @@ async function call<T>(method: string, params: unknown): Promise<T> {
   return json.result as T;
 }
 
-export function getHosts(): Promise<ZabbixHost[]> {
-  return call<ZabbixHost[]>("host.get", {
+// Fetch hosts. With a `search` term, the query is filtered server-side by
+// technical name (host) or visible name (case-insensitive substring, either
+// field matches). Without one, all hosts (within the configured groups) are
+// returned — used to populate the related-host picker and the relations map.
+export function getHosts(search?: string): Promise<ZabbixHost[]> {
+  const params: Record<string, unknown> = {
     output: ["hostid", "host", "name", "status"],
     selectGroups: ["groupid", "name"],
-  });
+    sortfield: "name",
+  };
+  const q = search?.trim();
+  if (q) {
+    params.search = { host: q, name: q };
+    params.searchByAny = true; // match either field, not both
+  }
+  return call<ZabbixHost[]>("host.get", params);
 }
 
 export async function getHost(

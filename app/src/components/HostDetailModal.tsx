@@ -477,8 +477,8 @@ function HostDetailModal({ hostid, onClose, onOpenHost }: Props) {
         destroyOnClose
       >
         <Typography.Paragraph type="secondary">
-          Link a port on this host to a port on another host. Each port can be
-          used by only one relation.
+          Link a port on this host to a port on another host. A port can be used
+          by more than one relation.
         </Typography.Paragraph>
 
         {rows.length ? (

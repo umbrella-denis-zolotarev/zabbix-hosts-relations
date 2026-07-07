@@ -5,8 +5,7 @@
 // data.json is a list of undirected host links. Each link connects a port on
 // one host to a port on another:
 //   { hostA, hostAport, hostB, hostBport }
-// A given (host, port) endpoint may be used by at most one link — one port is
-// used once.
+// A port may take part in several links; only exact-duplicate links are merged.
 
 const DATA_URL = import.meta.env.DATA_URL ?? "http://localhost";
 const RELATIONS_URL = `${DATA_URL}/api/data`;
@@ -97,48 +96,21 @@ export function relationsForHost(
   );
 }
 
-// Validate a proposed set of links for `hostid`. Enforces "one port used once"
-// across this host's own ports and the related endpoints, taking into account
-// the links of other hosts that will be kept. Returns an error string, or null.
+// Validate a proposed set of links for `hostid`. A port may be reused across
+// several relations, so the only requirements are that each row is complete and
+// that a host isn't related to itself. Returns an error string, or null.
 export function validateHostRelations(
-  pairs: HostPair[],
+  _pairs: HostPair[],
   hostid: string,
   links: HostRelation[],
 ): string | null {
   const host = String(hostid);
 
-  // Endpoints already used by links that don't involve this host (kept as-is).
-  const taken = new Set<string>();
-  for (const p of pairs) {
-    if (p.hostA === host || p.hostB === host) continue;
-    taken.add(`${p.hostA}:${p.hostAport}`);
-    taken.add(`${p.hostB}:${p.hostBport}`);
-  }
-
-  const localPorts = new Set<string>();
-  const relatedEndpoints = new Set<string>();
   for (const l of links) {
     if (!l.hostid || l.port === "" || l.relatedPort === "") {
       return "Every relation needs a port, a related host, and a related host port.";
     }
     if (String(l.hostid) === host) return "A host can't be related to itself.";
-
-    if (localPorts.has(l.port)) {
-      return `Port ${l.port} is used more than once on this host.`;
-    }
-    localPorts.add(l.port);
-    if (taken.has(`${host}:${l.port}`)) {
-      return `Port ${l.port} on this host is already used by another relation.`;
-    }
-
-    const relEp = `${l.hostid}:${l.relatedPort}`;
-    if (relatedEndpoints.has(relEp)) {
-      return `Port ${l.relatedPort} on host #${l.hostid} is used more than once.`;
-    }
-    relatedEndpoints.add(relEp);
-    if (taken.has(relEp)) {
-      return `Port ${l.relatedPort} on host #${l.hostid} is already used by another relation.`;
-    }
   }
   return null;
 }

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Empty, theme } from "antd";
+import { Empty } from "antd";
 import type { HostPair } from "../relations";
 import type { ZabbixHost } from "../zabbix";
 
@@ -12,11 +12,20 @@ interface Props {
   onSelect: (hostid: string) => void;
 }
 
-// Distinct, colour-blind-friendly hues used to tell crossing links apart.
-// Non-crossing links keep the theme's primary colour (handled separately).
+// draw.io / OSPF-diagram palette: light-green nodes, green links, dark ink
+// labels on a white canvas. Fixed (not theme-driven) so the diagram reads the
+// same in light and dark mode.
+const NODE_FILL = "#d5e8d4";
+const NODE_STROKE = "#82b366";
+const EDGE = "#82b366";
+const INK = "#1f1f1f";
+const SUB = "#5f6368";
+const BG = "#ffffff";
+
+// Distinct hues to tell crossing links apart (green is the default, so it's
+// excluded here). Non-crossing links stay green.
 const CROSS_COLORS = [
   "#e8590c", // orange
-  "#2f9e44", // green
   "#9c36b5", // grape
   "#e03131", // red
   "#0c8599", // teal
@@ -25,10 +34,10 @@ const CROSS_COLORS = [
   "#c2255c", // pink
 ];
 
-const L = 130; // ideal edge length for the layout
-const COMP_PAD = 46; // padding around each component (room for labels)
-const COMP_GAP = 50; // gap between packed components
-const MAX_ROW = 1250; // wrap components to a new row past this width
+const L = 165; // ideal edge length for the layout
+const COMP_PAD = 80; // padding around each component (room for labels)
+const COMP_GAP = 70; // gap between packed components
+const MAX_ROW = 1500; // wrap components to a new row past this width
 
 interface Pt {
   x: number;
@@ -48,33 +57,30 @@ function segmentsCross(a: Pt, b: Pt, c: Pt, d: Pt): boolean {
   );
 }
 
-// A schematic map of the hosts that have relations. Each connected group of
-// hosts is laid out on its own with a small force-directed pass, then the
-// groups are packed into the canvas — this keeps disconnected clusters from
-// collapsing into each other. Links are straight; any two that actually cross
-// are drawn in different colours (greedy colouring of the crossing-conflict
-// graph). Clicking a node opens it; hovering highlights its links.
+// A network map in the style of a draw.io OSPF diagram: each host is a green
+// circle with its name inside, links are straight green lines, and each link's
+// port is labelled next to the host it belongs to. Connected groups are laid
+// out separately (force-directed) then packed, so disconnected clusters don't
+// collapse together. Links that actually cross are drawn in distinct colours.
+// Clicking a node opens it; hovering highlights its links.
 function RelationsMap({ pairs, hosts, onSelect }: Props) {
-  const { token } = theme.useToken();
   const [hovered, setHovered] = useState<string | null>(null);
 
   const nameOf = useMemo(() => {
     const map = new Map(hosts.map((h) => [h.hostid, h.name || h.host]));
-    return (id: string) => map.get(id) || `#${id}`;
+    return (id: string) => map.get(id) || id;
   }, [hosts]);
 
   const { nodes, edges, width, height } = useMemo(() => {
+    const radiusFor = (id: string) =>
+      Math.max(48, 14 + nameOf(id).length * 4.2);
+
     const ids = Array.from(
       new Set(pairs.flatMap((p) => [p.hostA, p.hostB])),
     ).sort((a, b) => Number(a) - Number(b));
     const idx = new Map(ids.map((id, i) => [id, i]));
 
-    const degree = new Map<string, number>();
     const adj: number[][] = ids.map(() => []);
-    for (const p of pairs) {
-      degree.set(p.hostA, (degree.get(p.hostA) ?? 0) + 1);
-      degree.set(p.hostB, (degree.get(p.hostB) ?? 0) + 1);
-    }
     const links = pairs.map((p) => {
       const u = idx.get(p.hostA)!;
       const v = idx.get(p.hostB)!;
@@ -106,8 +112,8 @@ function RelationsMap({ pairs, hosts, onSelect }: Props) {
     const pos: Pt[] = ids.map(() => ({ x: 0, y: 0 }));
 
     // Force-directed layout, run independently per component so separate
-    // clusters don't repel each other off to infinity. Deterministic (circle
-    // init, no randomness) so the picture is stable across re-renders.
+    // clusters don't repel each other away. Deterministic (circle init, no
+    // randomness) so the picture is stable across re-renders.
     for (let c = 0; c < nc; c++) {
       const mem = members[c];
       const m = mem.length;
@@ -212,7 +218,7 @@ function RelationsMap({ pairs, hosts, onSelect }: Props) {
       id,
       x: pos[i].x,
       y: pos[i].y,
-      r: 8 + Math.min(degree.get(id) ?? 0, 8),
+      r: radiusFor(id),
     }));
 
     const edges = pairs.map((p, i) => ({
@@ -263,7 +269,7 @@ function RelationsMap({ pairs, hosts, onSelect }: Props) {
       width: Math.max(totalW, 400),
       height: Math.max(cy + rowH, 300),
     };
-  }, [pairs]);
+  }, [pairs, nameOf]);
 
   if (!nodes.length) {
     return (
@@ -275,25 +281,27 @@ function RelationsMap({ pairs, hosts, onSelect }: Props) {
   }
 
   const colorOf = (c: number) =>
-    c === 0 ? token.colorPrimary : CROSS_COLORS[(c - 1) % CROSS_COLORS.length];
+    c === 0 ? EDGE : CROSS_COLORS[(c - 1) % CROSS_COLORS.length];
   const radius = new Map(nodes.map((n) => [n.id, n.r]));
-  const radOf = (id: string) => radius.get(id) ?? 8;
+  const radOf = (id: string) => radius.get(id) ?? 48;
 
   // A halo behind small text so it stays readable where it nears a line.
   const labelHalo = {
     paintOrder: "stroke" as const,
-    stroke: token.colorBgContainer,
+    stroke: BG,
     strokeWidth: 3,
     strokeLinejoin: "round" as const,
   };
 
   return (
-    <div style={{ maxHeight: "80vh", overflow: "auto" }}>
+    <div style={{ maxHeight: "80vh", overflow: "auto", background: BG }}>
       <svg
         viewBox={`0 0 ${width} ${height}`}
         width="100%"
         style={{ display: "block", userSelect: "none" }}
       >
+        <rect x={0} y={0} width={width} height={height} fill={BG} />
+
         {/* Layer 1: the links, coloured so crossing ones differ. */}
         {edges.map((e) => {
           const active = !hovered || e.a === hovered || e.b === hovered;
@@ -305,13 +313,61 @@ function RelationsMap({ pairs, hosts, onSelect }: Props) {
               x2={e.to.x}
               y2={e.to.y}
               stroke={colorOf(e.color)}
-              strokeWidth={active ? 2.5 : 1.5}
-              strokeOpacity={active ? 0.85 : 0.12}
+              strokeWidth={active ? 2.5 : 2}
+              strokeOpacity={active ? 1 : 0.12}
             />
           );
         })}
 
-        {/* Layer 2: the host nodes. */}
+        {/* Layer 2: the port numbers, next to the host they belong to. */}
+        {edges.map((e) => {
+          const active = !hovered || e.a === hovered || e.b === hovered;
+          const dx = e.to.x - e.from.x;
+          const dy = e.to.y - e.from.y;
+          const len = Math.hypot(dx, dy) || 1;
+          const ux = dx / len;
+          const uy = dy / len;
+          const px = -uy; // perpendicular, to nudge labels off the wire
+          const py = ux;
+          const rA = radOf(e.a) + 12;
+          const rB = radOf(e.b) + 12;
+          const aPos = {
+            x: e.from.x + ux * rA + px * 7,
+            y: e.from.y + uy * rA + py * 7,
+          };
+          const bPos = {
+            x: e.to.x - ux * rB + px * 7,
+            y: e.to.y - uy * rB + py * 7,
+          };
+          return (
+            <g key={e.key} opacity={active ? 1 : 0.12}>
+              <text
+                x={aPos.x}
+                y={aPos.y}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fontSize={13}
+                fill={INK}
+                style={labelHalo}
+              >
+                {e.portA}
+              </text>
+              <text
+                x={bPos.x}
+                y={bPos.y}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fontSize={13}
+                fill={INK}
+                style={labelHalo}
+              >
+                {e.portB}
+              </text>
+            </g>
+          );
+        })}
+
+        {/* Layer 3: the host nodes, with the name inside the circle. */}
         {nodes.map((n) => {
           const active =
             !hovered ||
@@ -325,7 +381,7 @@ function RelationsMap({ pairs, hosts, onSelect }: Props) {
             <g
               key={n.id}
               style={{ cursor: "pointer" }}
-              opacity={active ? 1 : 0.3}
+              opacity={active ? 1 : 0.35}
               onClick={() => onSelect(n.id)}
               onMouseEnter={() => setHovered(n.id)}
               onMouseLeave={() => setHovered(null)}
@@ -335,72 +391,30 @@ function RelationsMap({ pairs, hosts, onSelect }: Props) {
                 cx={n.x}
                 cy={n.y}
                 r={n.r}
-                fill={
-                  n.id === hovered ? token.colorPrimary : token.colorPrimaryBg
-                }
-                stroke={token.colorPrimary}
-                strokeWidth={2}
+                fill={NODE_FILL}
+                stroke={NODE_STROKE}
+                strokeWidth={n.id === hovered ? 3 : 2}
               />
               <text
                 x={n.x}
-                y={n.y + n.r + 22}
+                y={n.y - 5}
                 textAnchor="middle"
                 dominantBaseline="middle"
-                fontSize={26}
-                fill={token.colorText}
-                style={labelHalo}
+                fontSize={18}
+                fontWeight={700}
+                fill={INK}
               >
                 {nameOf(n.id)}
               </text>
-            </g>
-          );
-        })}
-
-        {/* Layer 3: the port numbers, pushed off each line and drawn on top. */}
-        {edges.map((e) => {
-          const active = !hovered || e.a === hovered || e.b === hovered;
-          const dx = e.to.x - e.from.x;
-          const dy = e.to.y - e.from.y;
-          const len = Math.hypot(dx, dy) || 1;
-          const ux = dx / len;
-          const uy = dy / len;
-          const px = -uy; // perpendicular, to nudge labels off the wire
-          const py = ux;
-          const rA = radOf(e.a) + 22;
-          const rB = radOf(e.b) + 22;
-          const aPos = {
-            x: e.from.x + ux * rA + px * 6,
-            y: e.from.y + uy * rA + py * 6,
-          };
-          const bPos = {
-            x: e.to.x - ux * rB + px * 6,
-            y: e.to.y - uy * rB + py * 6,
-          };
-          return (
-            <g key={e.key} opacity={active ? 1 : 0.12}>
               <text
-                x={aPos.x}
-                y={aPos.y}
+                x={n.x}
+                y={n.y + 15}
                 textAnchor="middle"
                 dominantBaseline="middle"
-                fontSize={11}
-                fontWeight={600}
-                fill={colorOf(e.color)}
-                style={labelHalo}
+                fontSize={12}
+                fill={SUB}
               >
-                {e.portA}
-              </text>
-              <text
-                x={bPos.x}
-                y={bPos.y}
-                textAnchor="middle"
-                dominantBaseline="middle"
-                fontSize={11}
-                fontWeight={600}
-                fill={colorOf(e.color)}
-                style={labelHalo}
-              >
-                {e.portB}
+                #{n.id}
               </text>
             </g>
           );

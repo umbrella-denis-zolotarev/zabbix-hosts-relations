@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
   Button,
@@ -18,7 +17,6 @@ import {
 } from "antd";
 import {
   ApartmentOutlined,
-  ArrowLeftOutlined,
   CodeOutlined,
   FileTextOutlined,
   LineChartOutlined,
@@ -119,18 +117,25 @@ function ansibleSummary(s: AnsibleStatus): string {
   return when ? `${meta.label} · ${when}` : meta.label;
 }
 
-function HostDetail() {
-  const { hostid } = useParams<{ hostid: string }>();
-  const navigate = useNavigate();
+interface Props {
+  // The host to show; when null the modal is closed.
+  hostid: string | null;
+  // Close the modal.
+  onClose: () => void;
+  // Switch the modal to another host (used by the clickable related hosts).
+  onOpenHost: (hostid: string) => void;
+}
+
+function HostDetailModal({ hostid, onClose, onOpenHost }: Props) {
   const [host, setHost] = useState<ZabbixHostDetail | null>(null);
   const [allHosts, setAllHosts] = useState<ZabbixHost[]>([]);
   const [relations, setRelations] = useState<HostPair[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Relations modal state. Each row is one editable link from this host's side:
-  // this host's port, the related host, and the related host's port.
-  const [modalOpen, setModalOpen] = useState(false);
+  // Relations editor state. Each row is one editable link from this host's
+  // side: this host's port, the related host, and the related host's port.
+  const [editOpen, setEditOpen] = useState(false);
   const [rows, setRows] = useState<HostRelation[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -159,7 +164,16 @@ function HostDetail() {
     }
   };
 
+  // Reload whenever the host changes; reset the nested modals so they don't
+  // carry over from the previously viewed host.
   useEffect(() => {
+    setEditOpen(false);
+    setResultOpen(false);
+    setError(null);
+    if (!hostid) {
+      setHost(null);
+      return;
+    }
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hostid]);
@@ -203,10 +217,10 @@ function HostDetail() {
     return h ? h.name || h.host : `#${id}`;
   };
 
-  const openModal = () => {
+  const openEditor = () => {
     setError(null);
     setRows(currentRelations.map((r) => ({ ...r })));
-    setModalOpen(true);
+    setEditOpen(true);
   };
 
   const updateRow = (index: number, patch: Partial<HostRelation>) => {
@@ -243,7 +257,7 @@ function HostDetail() {
       const next = setHostRelations(relations, hostid, links);
       await saveRelations(next);
       setRelations(next);
-      setModalOpen(false);
+      setEditOpen(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -260,7 +274,7 @@ function HostDetail() {
     }));
 
   const sshIp = resolveHostIp(host);
-  const sshLogin = import.meta.env.SSH_LOGIN ?? '';
+  const sshLogin = import.meta.env.SSH_LOGIN ?? "";
 
   // macOS Terminal.app is the default handler for the ssh:// URL scheme, so
   // navigating to ssh://<login>@<ip> opens Terminal and runs `ssh <login>@<ip>`.
@@ -277,192 +291,186 @@ function HostDetail() {
   };
 
   return (
-    <Flex vertical gap="middle" style={{ padding: 24 }}>
-      <Flex align="center" justify="space-between" gap="middle">
-        <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate("/")}>
-            Back
-          </Button>
-          <Typography.Title level={3} style={{ margin: 0 }}>
-            Host {host?.name ? `· ${host.name}` : `#${hostid}`}
-          </Typography.Title>
-        </Space>
-        <Space>
-          <Button
-            icon={<PlayCircleOutlined />}
-            onClick={runPlaybook}
-            loading={ansibleStarting || ansible.status === "running"}
-            disabled={!host || ansible.status === "running"}
-            title={
-              ansible.status === "running"
-                ? "Ansible playbook is running"
-                : "Run the ansible playbook for this host"
-            }
-            style={{ height: "auto", paddingTop: 4, paddingBottom: 4 }}
-          >
-            <Flex vertical align="flex-start" style={{ lineHeight: 1.2 }}>
-              <span>Ansible</span>
-              <span
-                style={{
-                  fontSize: 12,
-                  color: ANSIBLE_STATUS_META[ansible.status]?.color,
-                }}
-              >
-                {ansibleSummary(ansible)}
-              </span>
-            </Flex>
-          </Button>
-          <Button
-            icon={<FileTextOutlined />}
-            onClick={() => setResultOpen(true)}
-            disabled={!ansible.output}
-            title="View the last ansible run output"
-          >
-            Ansible run result
-          </Button>
-          <Button
-            icon={<ApartmentOutlined />}
-            onClick={openModal}
-            disabled={!host}
-          >
-            Relations
-          </Button>
-          <Button
-            icon={<CodeOutlined />}
-            onClick={openSsh}
-            disabled={!sshIp}
-            title={
-              sshIp
-                ? `ssh ${sshLogin}@${sshIp}`
-                : "No interface IP available for this host"
-            }
-          >
-            SSH
-          </Button>
-          <Button
-            icon={<LineChartOutlined />}
-            onClick={openCharts}
-            disabled={!hostid}
-          />
-          <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>
-            Refresh
-          </Button>
-        </Space>
-      </Flex>
-
-      {error && (
-        <Alert
-          type="error"
-          showIcon
-          message="Failed to load host"
-          description={error}
-          closable
-          onClose={() => setError(null)}
-        />
-      )}
-
-      <Card>
-        {loading ? (
-          <Skeleton active paragraph={{ rows: 6 }} />
-        ) : !host ? (
-          <Empty description={`Host #${hostid} not found`} />
-        ) : (
-          <Descriptions
-            bordered
-            column={{ xs: 1, sm: 1, md: 2 }}
-            size="middle"
-          >
-            <Descriptions.Item label="Host ID">
-              {host.hostid}
-            </Descriptions.Item>
-            <Descriptions.Item label="Status">
-              {host.status === "0" ? (
+    <>
+      <Modal
+        open={!!hostid}
+        onCancel={onClose}
+        footer={null}
+        width={960}
+        destroyOnClose
+        title={
+          <Space>
+            <span>Host {host?.name ? `· ${host.name}` : hostid ? `#${hostid}` : ""}</span>
+            {host &&
+              (host.status === "0" ? (
                 <Tag color="green">Enabled</Tag>
               ) : (
                 <Tag color="red">Disabled</Tag>
-              )}
-            </Descriptions.Item>
-            <Descriptions.Item label="Technical name">
-              {host.host}
-            </Descriptions.Item>
-            <Descriptions.Item label="Visible name">
-              {host.name}
-            </Descriptions.Item>
-            <Descriptions.Item label="Host groups" span={2}>
-              {host.groups?.length ? (
-                <Space size={[0, 8]} wrap>
-                  {host.groups.map((g) => (
-                    <Tag key={g.groupid}>{g.name}</Tag>
-                  ))}
-                </Space>
-              ) : (
-                "—"
-              )}
-            </Descriptions.Item>
-            <Descriptions.Item label="Description" span={2}>
-              {host.description || "—"}
-            </Descriptions.Item>
-          </Descriptions>
-        )}
-      </Card>
-
-      {host && (
-        <Card title="Interfaces" size="small">
-          <Table<ZabbixInterface>
-            rowKey="interfaceid"
-            size="small"
-            columns={interfaceColumns}
-            dataSource={host.interfaces ?? []}
-            pagination={false}
-          />
-        </Card>
-      )}
-
-      {host && (
-        <Card
-          title="Relations"
-          size="small"
-          extra={
-            <Button
-              type="link"
-              icon={<ApartmentOutlined />}
-              onClick={openModal}
-            >
-              Edit
-            </Button>
-          }
-        >
-          {currentRelations.length ? (
-            <Space direction="vertical" size="small" style={{ width: "100%" }}>
-              {currentRelations.map((r, i) => (
-                <Space key={i} size="small" wrap>
-                  <Tag>port {r.port}</Tag>
-                  <span>→</span>
-                  <Tag
-                    color="blue"
-                    style={{ cursor: "pointer" }}
-                    onClick={() => navigate(`/hosts/${r.hostid}`)}
-                  >
-                    {hostName(r.hostid)} (#{r.hostid})
-                  </Tag>
-                  <Tag>port {r.relatedPort}</Tag>
-                </Space>
               ))}
-            </Space>
-          ) : (
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description="No relations"
+          </Space>
+        }
+      >
+        <Flex vertical gap="middle">
+          <Flex wrap gap="small">
+            <Button
+              icon={<PlayCircleOutlined />}
+              onClick={runPlaybook}
+              loading={ansibleStarting || ansible.status === "running"}
+              disabled={!host || ansible.status === "running"}
+              title={
+                ansible.status === "running"
+                  ? "Ansible playbook is running"
+                  : "Run the ansible playbook for this host"
+              }
+              style={{ height: "auto", paddingTop: 4, paddingBottom: 4 }}
+            >
+              <Flex vertical align="flex-start" style={{ lineHeight: 1.2 }}>
+                <span>Ansible</span>
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: ANSIBLE_STATUS_META[ansible.status]?.color,
+                  }}
+                >
+                  {ansibleSummary(ansible)}
+                </span>
+              </Flex>
+            </Button>
+            <Button
+              icon={<FileTextOutlined />}
+              onClick={() => setResultOpen(true)}
+              disabled={!ansible.output}
+              title="View the last ansible run output"
+            >
+              Ansible run result
+            </Button>
+            <Button
+              icon={<ApartmentOutlined />}
+              onClick={openEditor}
+              disabled={!host}
+            >
+              Relations
+            </Button>
+            <Button
+              icon={<CodeOutlined />}
+              onClick={openSsh}
+              disabled={!sshIp}
+              title={
+                sshIp
+                  ? `ssh ${sshLogin}@${sshIp}`
+                  : "No interface IP available for this host"
+              }
+            >
+              SSH
+            </Button>
+            <Button
+              icon={<LineChartOutlined />}
+              onClick={openCharts}
+              disabled={!hostid}
+              title="Open charts in Zabbix"
+            />
+            <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>
+              Refresh
+            </Button>
+          </Flex>
+
+          {error && (
+            <Alert
+              type="error"
+              showIcon
+              message="Failed to load host"
+              description={error}
+              closable
+              onClose={() => setError(null)}
             />
           )}
-        </Card>
-      )}
+
+          {loading ? (
+            <Skeleton active paragraph={{ rows: 6 }} />
+          ) : !host ? (
+            <Empty description={`Host #${hostid} not found`} />
+          ) : (
+            <>
+              <Descriptions bordered column={{ xs: 1, sm: 1, md: 2 }} size="middle">
+                <Descriptions.Item label="Host ID">{host.hostid}</Descriptions.Item>
+                <Descriptions.Item label="Status">
+                  {host.status === "0" ? (
+                    <Tag color="green">Enabled</Tag>
+                  ) : (
+                    <Tag color="red">Disabled</Tag>
+                  )}
+                </Descriptions.Item>
+                <Descriptions.Item label="Technical name">{host.host}</Descriptions.Item>
+                <Descriptions.Item label="Visible name">{host.name}</Descriptions.Item>
+                <Descriptions.Item label="Host groups" span={2}>
+                  {host.groups?.length ? (
+                    <Space size={[0, 8]} wrap>
+                      {host.groups.map((g) => (
+                        <Tag key={g.groupid}>{g.name}</Tag>
+                      ))}
+                    </Space>
+                  ) : (
+                    "—"
+                  )}
+                </Descriptions.Item>
+                <Descriptions.Item label="Description" span={2}>
+                  {host.description || "—"}
+                </Descriptions.Item>
+              </Descriptions>
+
+              <Card title="Interfaces" size="small">
+                <Table<ZabbixInterface>
+                  rowKey="interfaceid"
+                  size="small"
+                  columns={interfaceColumns}
+                  dataSource={host.interfaces ?? []}
+                  pagination={false}
+                />
+              </Card>
+
+              <Card
+                title="Relations"
+                size="small"
+                extra={
+                  <Button type="link" icon={<ApartmentOutlined />} onClick={openEditor}>
+                    Edit
+                  </Button>
+                }
+              >
+                {currentRelations.length ? (
+                  <Space direction="vertical" size="small" style={{ width: "100%" }}>
+                    {currentRelations.map((r, i) => (
+                      <Space key={i} size="small" wrap>
+                        <Tag>port {r.port}</Tag>
+                        <span>→</span>
+                        <Tag
+                          color="blue"
+                          style={{ cursor: "pointer" }}
+                          onClick={() => onOpenHost(String(r.hostid))}
+                        >
+                          {hostName(r.hostid)} (#{r.hostid})
+                        </Tag>
+                        <Tag>port {r.relatedPort}</Tag>
+                      </Space>
+                    ))}
+                  </Space>
+                ) : (
+                  <Empty
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    description="No relations"
+                  />
+                )}
+              </Card>
+            </>
+          )}
+        </Flex>
+      </Modal>
 
       <Modal
         title={`Relations · ${host?.name || `#${hostid}`}`}
-        open={modalOpen}
+        open={editOpen}
         onOk={handleSave}
-        onCancel={() => setModalOpen(false)}
+        onCancel={() => setEditOpen(false)}
         confirmLoading={saving}
         okText="Save"
         width={640}
@@ -512,10 +520,7 @@ function HostDetail() {
             ))}
           </Space>
         ) : (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="No relations"
-          />
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No relations" />
         )}
 
         <Button
@@ -563,8 +568,8 @@ function HostDetail() {
           {ansible.output || "No output yet."}
         </pre>
       </Modal>
-    </Flex>
+    </>
   );
 }
 
-export default HostDetail;
+export default HostDetailModal;

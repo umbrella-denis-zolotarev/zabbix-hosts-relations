@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
   Button,
@@ -10,9 +10,14 @@ import {
   Tag,
   Typography,
 } from "antd";
-import { ReloadOutlined, SearchOutlined } from "@ant-design/icons";
+import {
+  ApartmentOutlined,
+  ReloadOutlined,
+  SearchOutlined,
+} from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { getHosts, type ZabbixHost } from "../zabbix";
+import HostDetailModal from "../components/HostDetailModal";
 
 const columns: ColumnsType<ZabbixHost> = [
   {
@@ -67,6 +72,9 @@ const columns: ColumnsType<ZabbixHost> = [
 
 function HostList() {
   const navigate = useNavigate();
+  // The selected host id comes from the route (/hosts/:hostid), which drives
+  // the detail modal — so deep links and the back button keep working.
+  const { hostid: selectedHostId } = useParams<{ hostid: string }>();
   const [hosts, setHosts] = useState<ZabbixHost[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -89,7 +97,9 @@ function HostList() {
     load();
   }, []);
 
-  // Local, client-side search across all visible fields.
+  const openHost = (id: string) => navigate(`/hosts/${id}`);
+
+  // Local, client-side search across all visible fields (incl. group names).
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return hosts;
@@ -115,6 +125,12 @@ function HostList() {
             onChange={(e) => setSearch(e.target.value)}
             style={{ width: 280 }}
           />
+          <Button
+            icon={<ApartmentOutlined />}
+            onClick={() => navigate("/map")}
+          >
+            Relations map
+          </Button>
           <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>
             Refresh
           </Button>
@@ -141,9 +157,15 @@ function HostList() {
         pagination={{ showSizeChanger: true, defaultPageSize: 20 }}
         footer={() => `${filtered.length} of ${hosts.length} host(s)`}
         onRow={(record) => ({
-          onClick: () => navigate(`/hosts/${record.hostid}`),
+          onClick: () => openHost(record.hostid),
           style: { cursor: "pointer" },
         })}
+      />
+
+      <HostDetailModal
+        hostid={selectedHostId ?? null}
+        onClose={() => navigate("/")}
+        onOpenHost={openHost}
       />
     </Flex>
   );
